@@ -1,0 +1,375 @@
+---
+title: "Análisis Predictivo ~ Primer parcial"
+author: "Sol Winkel"
+date: "`29-03-2023`"
+output: 
+  bookdown::html_document2:
+    theme: cerulean
+    toc: true #TRUE to include a table of contents in the output
+    toc_depth: 2 # Depth of headers to include in table of contents
+    toc_float: true
+    code_download: false
+    number_sections: true
+---
+>
+> Primer parcial
+
+El siguiente trabajo consiste en elegir una base de datos, realizar el tratamiento de la misma para analizarla y desarrollar un modelo predictivo. La base de datos seleccionada proviene de "Kaggle" y consiste en información de reservas de clientes en hoteles.
+
+Fuente: [Kaggle](https://www.kaggle.com/datasets/ahsan81/hotel-reservations-classification-dataset)
+
+***
+
+**Objetivo**
+
+El objetivo principal es entrenar un modelo predictivo que permita a los hoteles utilizar la totalidad de las habitaciones considerando incluso las reservas que podrán ser canceladas. Poder predecir quién cancelará la reserva a partir de distintas características de la reserva como: cantidad de adultos, cantidad de niños, cantidad de noches, tipo de habitación, fecha, etc. 
+
+Un modelo de respuesta puede proporcionar un aumento significativo en el rendimiento del hotel al tener la ocupacion al maximo y aumentar las gananacias.  
+
+***
+
+```{r clean,  message=F, include=FALSE}
+# limpiar memoria
+rm(list=ls())
+gc()
+
+# cargar librerías
+library(readxl)
+library(tidyverse)   
+library(ggplot2)     
+library(skimr)
+library(funModeling)
+library(readr)
+library(GGally)
+```
+
+```{r}
+hotelReserv = read.csv('/Users/sol/Desktop/Hotel Reservations.csv', sep = ",")
+```
+
+```{r}
+glimpse(hotelReserv)
+
+hotelReserv %>% select(arrival_year) %>% unique() 
+#La base contiene registros del 2017 y del 2018
+
+hotelReserv %>% select(room_type_reserved) %>% unique()
+#Las habitaciones son de tipo 1,2,3,4,5,6,7
+
+hotelReserv %>% select(market_segment_type) %>% unique()
+#Los tipos de segmentos son: Offline, Online, Corporate, Aviation, Complementary
+
+hotelReserv %>% select(type_of_meal_plan) %>% unique()
+#Los tipos de planes de comida son 1,2,3 o no seleccionado
+
+#chequear tipo de datos del Id
+class(hotelReserv$Booking_ID) #caracter
+
+#chequear tipo de dato de numero de adultos y del año de la reserva
+class(hotelReserv$no_of_adults) #integer
+class(hotelReserv$arrival_year) #integer
+```
+
+La base de datos cuenta con 36.275 registros y 19 variables (5 de tipo caracter y 14 numericas) 
+
+Variables de entrada:
+
+- Booking_ID: identificador único de cada reserva
+- no_of_adults: cantidad de adultos 
+- no_of_children: cantidad de niños
+- no_of_weekend_nights: cantidad de noches de fin de semana (Sábado o Domingo) que el cliente se quedó o reservó para quedarse.
+- no_of_week_nights: cantidad de noches de la semana (Lunes a Viernes) que el cliente se quedó o reservó para quedarse.
+- type_of_meal_plan: tipo de menú que el cliente reservó 
+- required_car_parking_space: El cliente necesita una cochera? (0 en caso de que No, 1 en caso de que Si)
+- room_type_reserved: Tipo de habitación reservada por el cliente. 
+- lead_time: Número de días entre la fecha de reserva y la fecha de llegada
+- arrival_year: año de la fecha de llegada
+- arrival_month: mes de la fecha de llegada
+- arrival_date: día del mes
+- market_segment_type: designación del segmento de mercado.
+- repeated_guest: es el cliente un huesped repetido? (0 en caso de que No, 1 en caso de que Si))
+- no_of_previous_cancellations: Número de reservas anteriores que fueron canceladas por el cliente antes de la reserva actual
+- no_of_previous_bookings_not_canceled: Número de reservas anteriores no canceladas por el cliente antes de la reserva actual
+- avg_price_per_room: Precio medio por día de la reserva (en euros)
+- no_of_special_requests: Número total de solicitudes especiales realizadas por el cliente (por ejemplo, piso alto, vista desde la habitación, etc.)
+
+Variable de salida:
+
+- booking_status: indica si la reserva fue cancelada o no.
+
+La variable booking_status es la variable target
+
+
+Es importante chequear que no hayan registros duplicados (mismo codigo de ID)
+```{r}
+hotelReserv %>% group_by(Booking_ID) %>% count() #al haber 36275 unicos, no hay repetidos
+```
+
+```{r}
+min(hotelReserv$arrival_year)
+max(hotelReserv$arrival_year)
+```
+Los registros de la base son del 2017 y 2018.
+
+
+Creacion de nuevas variables
+```{r}
+# crear variable FECHA DE LA LLEGADA
+fecha_llegada <- data.frame(fecha_llegada = ISOdate(hotelReserv$arrival_year, hotelReserv$arrival_month, hotelReserv$arrival_date))
+hotelReserv_con_fecha <- cbind(hotelReserv, fecha_llegada)
+
+
+#crear variable de TOTAL HUESPEDES
+total_huespedes <- data.frame(total_huespedes = hotelReserv$no_of_adults+hotelReserv$no_of_children)
+hotelReserv_con_todo <- cbind(hotelReserv_con_fecha, total_huespedes)
+```
+
+**Análisis de datos faltantes (NAs)**
+
+```{r}
+# Contar número de nulos por columna
+sapply(hotelReserv, function(x) sum(is.na(x)))
+```
+
+No hay nulos en ninguna de las columnas
+
+
+**Outliers (valores atípicos)**
+
+Se evaluaran outliers de variables numéricas
+
+```{r}
+ggplot(hotelReserv, aes(x = no_of_adults)) + geom_boxplot(outlier.colour = 'red')
+ggplot(hotelReserv, aes(x = no_of_children)) + geom_boxplot(outlier.colour = 'red')
+ggplot(hotelReserv, aes(x = no_of_weekend_nights)) + geom_boxplot(outlier.colour = 'red')
+ggplot(hotelReserv, aes(x = no_of_week_nights)) + geom_boxplot(outlier.colour = 'red')
+ggplot(hotelReserv, aes(x = lead_time)) + geom_boxplot(outlier.colour = 'red')
+ggplot(hotelReserv, aes(x = no_of_previous_cancellations)) + geom_boxplot(outlier.colour = 'red')
+ggplot(hotelReserv, aes(x = no_of_previous_bookings_not_canceled)) + geom_boxplot(outlier.colour = 'red')
+ggplot(hotelReserv, aes(x = avg_price_per_room)) + geom_boxplot(outlier.colour = 'red')
+ggplot(hotelReserv, aes(x = no_of_special_requests)) + geom_boxplot(outlier.colour = 'red')
+```
+
+En la variable cantidad de adultos, los valores se encuentran entre 0 y 4. 
+- Hay 139 registros que no tienen adultos en sus reservas pero sí chicos, lo que llama la atención. Se puede tratar de reservas en las que los menores son de entre 16 y 18 años (pueden alojarse solos en muchos paises pero cuentan como menores).
+```{r}
+hotelReserv %>% filter(no_of_adults == 0) %>% count()
+hotelReserv %>% filter(no_of_adults == 0)  %>% select(no_of_children)
+summary(hotelReserv_con_todo$no_of_adults)
+```
+
+En la variable cantidad de chicos los valores se encuentran entre 0 y 10.
+- La mayoría de las reservas son sin chicos.
+- Hay un solo caso de 10 chicos y dos casos de 9. El resto tienen 0,1,2 o 3.
+```{r}
+hotelReserv %>% group_by(no_of_children) %>% count()
+```
+
+En la variable cantidad de noches de fin de semana, los valores se encuentran entre 0 y 7.
+- Hay un solo registro de 7 noches de fin de semana, de una persona que reservó para 17 días de semana (24 días en total)
+```{r}
+hotelReserv %>% group_by(no_of_weekend_nights) %>% count()
+hotelReserv %>% filter(no_of_weekend_nights ==7) %>% select(no_of_week_nights)
+summary(hotelReserv_con_todo$no_of_weekend_nights)
+```
+
+En la variable cantidad de noches de semana, los valores se encuentran entre 0 y 17. 
+- La mediana son 2 noches
+
+```{r}
+summary(hotelReserv_con_todo$no_of_week_nights)
+```
+
+
+En la variable que indica la anticipación de la reserva, la mediana se encuentra en 57 dias. 
+- Hay registros variados en cuanto al tiempo de anticipación.
+- Van desde 0 a 443
+```{r}
+summary(hotelReserv$lead_time)
+```
+El valor mas alto es 443, siendo un año y dos meses aproximadamente. Esta variable no tiene outliers severos.
+```{r}
+IQR = IQR(hotelReserv$lead_time)
+443 > 126+3*109
+```
+
+En la variable cantidad de cancelaciones previas realizadas por el cliente que hace la reserva, la mediana es 0.
+- El maximo es 13
+```{r}
+summary(hotelReserv$no_of_previous_cancellations)
+hotelReserv %>% group_by(no_of_previous_cancellations) %>% count()
+```
+
+En la variable cantidad de reservas no canceladas por el cliente que realiza la reserva, la mediana tambien es 0.
+- El maximo es 58
+```{r}
+summary(hotelReserv$no_of_previous_bookings_not_canceled)
+hotelReserv %>% group_by(no_of_previous_bookings_not_canceled) %>% count()
+```
+
+En la variable precio promedio por noche, los valores son muy variados
+- Los valores van desde 0 a 540
+- La mediana es 99,45 euros
+
+Es llamativo que hay 545 registros que el precio promedio por noche es 0.
+- En el caso de que se traten de Complementary puede que sean 0 debido a qué son compensaciones.
+```{r}
+summary(hotelReserv$avg_price_per_room)
+hotelReserv %>% filter(avg_price_per_room == 0)  %>% count()
+hotelReserv %>% filter(avg_price_per_room == 0) %>% group_by(market_segment_type)  %>% count()
+```
+
+Al tratarse de registros de Complementary y de Online, los de Online deben imputarse. 
+Se imputan los valores en el que el costo promedio por noche es 0 euros, por la media de los costos, asumiendo que es un error de la base.  
+```{r}
+hotelReserv$avg_price_per_room <- ifelse(hotelReserv$avg_price_per_room < 1 & hotelReserv$market_segment_type == 'Complementary', mean(hotelReserv$avg_price_per_room), hotelReserv$avg_price_per_room)
+```
+
+En la variable cantidad de requerimientos especiales, la mediana es 0. Los valores van entre 0 y 5
+
+```{r}
+# Histogramas
+hist(hotelReserv$no_of_adults)
+hist(hotelReserv$no_of_children)
+hist(hotelReserv$no_of_weekend_nights)
+hist(hotelReserv$no_of_week_nights)
+hist(hotelReserv$lead_time)
+hist(hotelReserv$no_of_previous_cancellations)
+hist(hotelReserv$no_of_previous_bookings_not_canceled)
+hist(hotelReserv$avg_price_per_room)
+hist(hotelReserv$no_of_special_requests)
+```
+
+***
+
+**Análisis de correlación**
+
+Con un correlograma visualizamos la correlación entre todas las variables cuantitativas:
+
+```{r}
+dfnum = hotelReserv %>% select(c(no_of_adults, no_of_children, no_of_weekend_nights, no_of_week_nights, required_car_parking_space, lead_time, repeated_guest, no_of_previous_cancellations, no_of_previous_bookings_not_canceled, avg_price_per_room, no_of_special_requests))
+
+GGally::ggcorr(
+  dfnum, method=c("pairwise","spearman"),  
+  label=T, hjust=1, label_size=2, layout.exp=10, size=3)
+```
+
+Las variables correlacionadas positivamente están en rojo y las variables negativamente correlacionadas están en azul.
+
+Las variables que mas estan correlacionadas positivamente son cliente repetido con la cantidad de reservas previas no canceladas. Esto tiene sentido debido a que tiene que ver con la fidelidad del cliente. Si ya es cliente, tendra menos reservas canceladas debido a que realiza reservas frecuentemente y esta comprometido con el lugar. 
+
+En cuanto a las correlaciones negativas ninguna es significativa, asi como tampoco otras positivas. Las demas variables no se encuentran correlacionadas entre si. 
+
+***
+
+**Análisis gráfico**
+
+```{r}
+#análisis de las reservas
+
+#variación de reservas a lo largo del tiempo 
+ggplot(hotelReserv_con_todo, aes(fecha_llegada)) + geom_density(color = "black", fill = "pink") + geom_vline(aes(xintercept = mean(fecha_llegada)), color = 'red', size = 1)
+
+hotelReserv_con_todo %>% group_by(fecha_llegada) %>% summarise(Cantidad=n()) %>% ggplot() +
+  geom_line(aes(x=fecha_llegada, y=Cantidad, color= as.factor(year(fecha_llegada))), color = "#004173", size=1, alpha=0.9) + labs(x = "Fecha", y= "Cantidad por dia") + theme_minimal()
+
+#Los registros son desde Julio 2017 hasta diciembre 2018
+#El pico de reservas es en Octubre de 2018 
+#Julio de 2018 es el momento de menos reservas
+
+#precio promedio y modo de reserva
+ggplot(hotelReserv, aes(x = market_segment_type, y = avg_price_per_room, color = market_segment_type)) + geom_point() + xlab('Market segment type') 
+
+#Complementary son los mas bajos
+#Aviation promedio 100 
+#Corporate hasta 200 aprox
+#Online y offline variado pero llegan a precioas mas altos
+
+#modo de reserva y anticipacion
+ggplot(hotelReserv, aes(x = market_segment_type, y = lead_time, color = market_segment_type)) + geom_point() + xlab('market segment type') 
+#Aviation poca anticipacion
+#Complementary poca anticipacion salvo algunos casos
+```
+
+
+```{r}
+
+#análisis del mercado
+
+#reservas por mes
+hotelReserv_con_todo %>% group_by(arrival_month, arrival_year) %>% summarise(cantidad = n()) %>% ggplot(aes(x = arrival_month, y = cantidad, fill = arrival_year)) + xlab("Mes") + ylab("Cantidad")+
+  geom_bar(stat="identity", fill = "#004173")  + facet_wrap(~ arrival_year, ncol = 2) + geom_text(aes(label = cantidad), colour = "grey", size = 3, vjust = 1.5, position = position_dodge(.9)) 
+
+#modo de realización de reserva
+modo = hotelReserv %>% group_by(market_segment_type) %>% summarise(cantidad = n())
+modo %>% ggplot(aes(x = market_segment_type, y = cantidad)) +  xlab("market_segment_type") + ylab("Cantidad")+
+  geom_bar(stat="identity", fill = "#004173") 
+
+# tipo de habitaciones de reservas
+hab = hotelReserv %>% group_by(room_type_reserved) %>% summarise(cantidad = n())
+hab %>% ggplot(aes(x = room_type_reserved, y = cantidad)) +  xlab("Tipo de habitacion") + ylab("Cantidad")+
+  geom_bar(stat="identity", fill = "#004173") 
+
+# tipo de comida de reservas
+comida = hotelReserv %>% group_by(type_of_meal_plan) %>% summarise(cantidad = n())
+comida %>% ggplot(aes(x = type_of_meal_plan, y = cantidad)) +  xlab("Tipo de menu") + ylab("Cantidad")+
+  geom_bar(stat="identity", fill = "#004173") 
+
+#tiempo de anticipación
+hotelReserv_con_todo %>% group_by(lead_time, arrival_year) %>% summarise(cantidad = n()) %>% ggplot(aes(x = lead_time, y = cantidad, fill = arrival_year)) + xlab("Tiempo de anticipacion") + ylab("Cantidad")+
+  geom_point(stat="identity", fill = "#004173")  + facet_wrap(~ arrival_year, ncol = 2)
+
+#total de huespedes
+hotelReserv_con_todo %>% group_by(total_huespedes) %>% summarise(cantidad = n()) %>% ggplot(aes(x = total_huespedes, y = cantidad)) +  xlab("Total huespedes") + ylab("Cantidad")+
+  geom_bar(stat="identity", fill = "#004173")
+
+```
+
+```{r}
+#análisis discriminando por cancelados o no
+
+#precio promedio vs cancelados y no
+hotelReserv_con_todo %>% group_by(avg_price_per_room, booking_status) %>% summarise(cantidad = n()) %>% ggplot(aes(x = avg_price_per_room, y = cantidad, fill = booking_status)) + xlab("Precio promedio por noche") + ylab("Cantidad")+
+  geom_point(stat="identity", fill = "#004173")  + facet_wrap(~ booking_status, ncol = 2)
+
+#market segment vs cancelados o no
+ms = hotelReserv_con_todo %>% group_by(market_segment_type, booking_status) %>% summarise(cantidad = n())
+
+ggplot(ms, aes(x = market_segment_type, y = cantidad, fill = booking_status)) + geom_col(position = "dodge") + 
+  geom_text(aes(label = cantidad), colour = "black", size = 3, vjust = 1.5, position = position_dodge(.9)) 
+
+#parking vs cancelados o no
+pp = hotelReserv_con_todo %>% group_by(required_car_parking_space, booking_status) %>% summarise(cantidad = n())
+
+ggplot(pp, aes(x = required_car_parking_space, y = cantidad, fill = booking_status)) + geom_col(position = "dodge") + 
+  geom_text(aes(label = cantidad), colour = "white", size = 3, vjust = 1.5, position = position_dodge(.9)) 
+
+
+#special requests vs cancelados o no
+sp = hotelReserv_con_todo %>% group_by(no_of_special_requests, booking_status) %>% summarise(cantidad = n())
+
+ggplot(sp, aes(x = no_of_special_requests, y = cantidad, fill = booking_status)) + geom_col(position = "dodge") + 
+  geom_text(aes(label = cantidad), colour = "black", size = 3, vjust = 1.5, position = position_dodge(.9)) 
+
+#si tienen hijos o no vs cancelados o no
+
+hotelReserv_con_todo %>% mutate(hijos_sino = ifelse(no_of_children != 0, 1, 0)) %>% group_by(hijos_sino, booking_status) %>% summarise(cantidad = n()) %>%  ggplot(aes(x = hijos_sino, y = cantidad, fill = booking_status)) + geom_col(position = "dodge") + 
+  geom_text(aes(label = cantidad), colour = "white", size = 3, vjust = 1.5, position = position_dodge(.9)) 
+```
+***
+
+**Conclusiones**
+
+El dataset tiene un gran potencial para su continuo uso, considerando la facilidad que tiene para ir actualizándose así como también para incorporar nuevas variables que resulten relevantes.
+
+Es una base que puede ser aplicada por empresas hoteleras
+
+A futuro se podrían agregar nuevas variables que sean necesarias para poder indicar en caso de cancelación, si volverá a reservar o no en esa empresa.
+
+En cuanto a lo observado, se podría decir que no hay una fuerte correlación entre las variables. 
+
+Así como también se pudo ver que las reservas de personas que se alojan por trabajo son menos propensas a cancelar las reservas, junto con las reservas que tienen al menos 2 requerimientos especiales. 
+
+
+
+
